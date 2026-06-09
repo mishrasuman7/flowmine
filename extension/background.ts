@@ -24,10 +24,15 @@
  */
 
 import type {
+  ActionResult,
   BrowserEvent,
   BrowserEventType,
+  ExtensionMessage,
+  ExtensionResponse,
   FlowMineConfig,
   FlushStatus,
+  Skill,
+  SkillAction,
 } from './types';
 
 // -----------------------------------------------------------------------------
@@ -309,26 +314,204 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 // -----------------------------------------------------------------------------
+// Skill execution
+// -----------------------------------------------------------------------------
+
+/** How long we wait for chrome.tabs.update to finish a navigation. The page
+ *  is considered ready once webNavigation.onCompleted fires for the top
+ *  frame; the executor proceeds to the next action immediately after. */
+const NAVIGATE_TIMEOUT_MS = 20_000;
+
+/** How long we wait for the content script to acknowledge a sendMessage
+ *  before treating the action as failed. Generous, because some pages take
+ *  noticeable time to settle before the content script's listener is up. */
+const ACTION_TIMEOUT_MS = 35_000;
+
+/**
+ * Resolve when the active tab finishes loading the URL we just navigated
+ * to. Rather than rely on chrome.tabs.update's optional callback (which
+ * fires before the page is parseable), we listen for the matching
+ * webNavigation.onCompleted on the same tab + top frame.
+ */
+function waitForNavigation(tabId: number, url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.webNavigation.onCompleted.removeListener(listener);
+      reject(new Error(`Navigation to ${url} timed out`));
+    }, NAVIGATE_TIMEOUT_MS);
+
+    const listener = (
+      details: chrome.webNavigation.WebNavigationFramedCallbackDetails,
+    ): void => {
+      if (details.tabId !== tabId || details.frameId !== 0) return;
+      clearTimeout(timer);
+      chrome.webNavigation.onCompleted.removeListener(listener);
+      resolve();
+    };
+    chrome.webNavigation.onCompleted.addListener(listener);
+  });
+}
+
+/**
+ * Forward a SkillAction to the content script in the given tab and wait
+ * for the ActionResult. Wraps Chrome's sendMessage in a Promise so the
+ * caller can await it, and adds a timeout so a missing listener does not
+ * hang the executor forever.
+ */
+function dispatchToContent(
+  tabId: number,
+  action: SkillAction,
+): Promise<ActionResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result: ActionResult): void => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      settle({
+        success: false,
+        error: `Content script did not respond within ${ACTION_TIMEOUT_MS}ms`,
+      });
+    }, ACTION_TIMEOUT_MS);
+
+    const message: ExtensionMessage = { kind: 'execute_action', action };
+    chrome.tabs.sendMessage(tabId, message, (response: ExtensionResponse) => {
+      clearTimeout(timer);
+      const lastError = chrome.runtime.lastError;
+      if (lastError) {
+        settle({
+          success: false,
+          error: lastError.message ?? 'chrome.tabs.sendMessage failed',
+        });
+        return;
+      }
+      if (response && response.kind === 'action_result') {
+        settle(response.result);
+        return;
+      }
+      settle({
+        success: false,
+        error: 'Unexpected response from content script',
+      });
+    });
+  });
+}
+
+/**
+ * Execute one Skill end to end on the currently active tab. Walks the
+ * SkillSpec.actions array, dispatching each action to the appropriate
+ * handler (background-owned navigate, or content-script-owned everything
+ * else), and stops at the first failure.
+ *
+ * Returns { success, duration_ms, error? } so the caller can decide
+ * whether to surface a toast and what to POST to /api/execute.
+ */
+async function executeSkill(
+  skill: Skill,
+): Promise<{ success: boolean; duration_ms: number; error?: string }> {
+  const started = Date.now();
+
+  const [tab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (!tab?.id) {
+    return {
+      success: false,
+      duration_ms: Date.now() - started,
+      error: 'No active tab to run the skill in',
+    };
+  }
+  const tabId = tab.id;
+
+  for (const action of skill.action_sequence.actions) {
+    if (action.type === 'navigate') {
+      try {
+        await chrome.tabs.update(tabId, { url: action.url });
+        await waitForNavigation(tabId, action.url);
+      } catch (err) {
+        return {
+          success: false,
+          duration_ms: Date.now() - started,
+          error: (err as Error).message,
+        };
+      }
+      continue;
+    }
+    const result = await dispatchToContent(tabId, action);
+    if (!result.success) {
+      return {
+        success: false,
+        duration_ms: Date.now() - started,
+        error: result.error ?? `Action ${action.type} failed`,
+      };
+    }
+  }
+
+  return { success: true, duration_ms: Date.now() - started };
+}
+
+/**
+ * Pull the team's skills from the server and keep only active ones — those
+ * are the only safe candidates for one-click execution from the popup.
+ * Failures surface as an empty list so the popup degrades to "no skills
+ * found" rather than throwing.
+ */
+async function fetchActiveSkills(): Promise<Skill[]> {
+  const config = await readConfig();
+  if (!config.api_url || !config.team_id) return [];
+  const endpoint =
+    `${config.api_url.replace(/\/$/, '')}/api/skills` +
+    `?team_id=${encodeURIComponent(config.team_id)}`;
+  try {
+    const response = await fetch(endpoint);
+    if (!response.ok) return [];
+    const json = (await response.json()) as { skills?: Skill[] };
+    return (json.skills ?? []).filter((skill) => skill.status === 'active');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * POST the execution result back to /api/execute so the server can persist
+ * the row, bump counters, and broadcast execution-complete via Pusher.
+ * Best-effort — a failed report does not invalidate the run itself.
+ */
+async function reportExecution(
+  skill: Skill,
+  result: { success: boolean; duration_ms: number },
+): Promise<void> {
+  const config = await readConfig();
+  if (!config.api_url || !config.user_id) return;
+  try {
+    await fetch(`${config.api_url.replace(/\/$/, '')}/api/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        skill_id: skill.skill_id,
+        user_id: config.user_id,
+        success: result.success,
+        duration_ms: result.duration_ms,
+      }),
+    });
+  } catch (err) {
+    console.warn('[flowmine] reportExecution failed:', err);
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Popup message protocol
 // -----------------------------------------------------------------------------
 
-type PopupRequest =
-  | { kind: 'get_config' }
-  | { kind: 'set_config'; config: FlowMineConfig }
-  | { kind: 'get_status' }
-  | { kind: 'flush_now' };
-
-type PopupResponse =
-  | { kind: 'config'; config: FlowMineConfig }
-  | { kind: 'status'; status: FlushStatus }
-  | { kind: 'ok' }
-  | { kind: 'error'; message: string };
-
 chrome.runtime.onMessage.addListener(
   (
-    message: PopupRequest,
+    message: ExtensionMessage,
     _sender,
-    sendResponse: (response: PopupResponse) => void,
+    sendResponse: (response: ExtensionResponse) => void,
   ) => {
     void (async () => {
       try {
@@ -349,6 +532,34 @@ chrome.runtime.onMessage.addListener(
           case 'flush_now': {
             await flush();
             sendResponse({ kind: 'ok' });
+            return;
+          }
+          case 'list_active_skills': {
+            sendResponse({
+              kind: 'skills',
+              skills: await fetchActiveSkills(),
+            });
+            return;
+          }
+          case 'run_skill': {
+            const outcome = await executeSkill(message.skill);
+            void reportExecution(message.skill, outcome);
+            sendResponse({
+              kind: 'run_result',
+              success: outcome.success,
+              duration_ms: outcome.duration_ms,
+              ...(outcome.error ? { error: outcome.error } : {}),
+            });
+            return;
+          }
+          case 'execute_action': {
+            // execute_action is meant for the content script. If a popup
+            // ever sends it here by mistake, refuse politely instead of
+            // half-handling it.
+            sendResponse({
+              kind: 'error',
+              message: 'execute_action is handled in the content script',
+            });
             return;
           }
         }

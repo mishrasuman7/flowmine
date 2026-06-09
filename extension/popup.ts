@@ -5,33 +5,37 @@
  * touches storage directly; every read or write goes through the
  * chrome.runtime message protocol implemented in background.ts, so the
  * source of truth for the storage schema lives in one place.
+ *
+ * The popup surfaces three sections, top to bottom:
+ *   1. Configuration — team_id, user_id, api_url inputs + Save.
+ *   2. Capture status — buffered event count, last flush time + diagnostics,
+ *      Flush now button.
+ *   3. Active skills — list pulled from /api/skills with a one-click Run
+ *      button per skill that dispatches the SkillSpec to the background
+ *      worker for execution on the current tab.
  */
 
-import type { FlowMineConfig, FlushStatus } from './types';
+import type {
+  ExtensionMessage,
+  ExtensionResponse,
+  FlowMineConfig,
+  FlushStatus,
+  Skill,
+} from './types';
 
 // -----------------------------------------------------------------------------
 // Message helpers
 // -----------------------------------------------------------------------------
 
-type PopupRequest =
-  | { kind: 'get_config' }
-  | { kind: 'set_config'; config: FlowMineConfig }
-  | { kind: 'get_status' }
-  | { kind: 'flush_now' };
-
-type PopupResponse =
-  | { kind: 'config'; config: FlowMineConfig }
-  | { kind: 'status'; status: FlushStatus }
-  | { kind: 'ok' }
-  | { kind: 'error'; message: string };
-
-function sendMessage(message: PopupRequest): Promise<PopupResponse> {
+function sendMessage(
+  message: ExtensionMessage,
+): Promise<ExtensionResponse> {
   // chrome.runtime.sendMessage returns a Promise in MV3 when no callback is
   // passed. We wrap it so a missing service-worker (e.g. during a forced
   // reload from chrome://extensions) surfaces a recognisable error instead
   // of an uncaught rejection.
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response: PopupResponse) => {
+    chrome.runtime.sendMessage(message, (response: ExtensionResponse) => {
       const err = chrome.runtime.lastError;
       if (err) {
         reject(new Error(err.message ?? 'sendMessage failed'));
@@ -61,9 +65,13 @@ const bufferedEl = el<HTMLElement>('buffered');
 const lastFlushEl = el<HTMLElement>('last-flush');
 const lastCountEl = el<HTMLElement>('last-count');
 const lastErrorEl = el<HTMLElement>('last-error');
+const skillsCountEl = el<HTMLElement>('skills-count');
+const skillListEl = el<HTMLUListElement>('skill-list');
+const skillEmptyEl = el<HTMLElement>('skill-empty');
+const skillResultEl = el<HTMLElement>('skill-result');
 
 // -----------------------------------------------------------------------------
-// Rendering
+// Rendering — configuration + capture status
 // -----------------------------------------------------------------------------
 
 function renderConfig(config: FlowMineConfig): void {
@@ -109,6 +117,105 @@ function renderStatus(status: FlushStatus): void {
 }
 
 // -----------------------------------------------------------------------------
+// Rendering — active skills
+// -----------------------------------------------------------------------------
+
+function renderSkillResult(
+  message: string,
+  tone: 'ok' | 'err',
+): void {
+  skillResultEl.innerHTML = '';
+  const span = document.createElement('span');
+  span.className = tone;
+  span.textContent = message;
+  skillResultEl.appendChild(span);
+}
+
+function clearSkillResult(): void {
+  skillResultEl.textContent = '';
+}
+
+function renderSkills(skills: Skill[]): void {
+  skillsCountEl.textContent = String(skills.length);
+  skillListEl.innerHTML = '';
+  if (skills.length === 0) {
+    skillEmptyEl.hidden = false;
+    return;
+  }
+  skillEmptyEl.hidden = true;
+  for (const skill of skills) {
+    const item = document.createElement('li');
+    item.className = 'skill-item';
+
+    const name = document.createElement('span');
+    name.className = 'skill-name';
+    name.textContent = skill.name;
+    name.title = skill.description ?? skill.name;
+
+    const steps = document.createElement('span');
+    steps.className = 'skill-steps';
+    const actionCount = skill.action_sequence?.actions?.length ?? 0;
+    steps.textContent = `${actionCount} step${actionCount === 1 ? '' : 's'}`;
+
+    const run = document.createElement('button');
+    run.className = 'skill-run';
+    run.type = 'button';
+    run.textContent = 'Run';
+    run.addEventListener('click', () => {
+      void runSkill(skill, run);
+    });
+
+    item.append(name, steps, run);
+    skillListEl.appendChild(item);
+  }
+}
+
+async function loadSkills(): Promise<void> {
+  try {
+    const response = await sendMessage({ kind: 'list_active_skills' });
+    if (response.kind === 'skills') {
+      renderSkills(response.skills);
+    }
+  } catch (err) {
+    renderSkillResult(`Could not load skills: ${(err as Error).message}`, 'err');
+  }
+}
+
+async function runSkill(skill: Skill, trigger: HTMLButtonElement): Promise<void> {
+  // Disable every Run button while one skill is executing so the user
+  // cannot fire two runs on the same tab. The runtime guards against this
+  // server-side, but stopping it client-side keeps the UX honest.
+  const allButtons = Array.from(
+    skillListEl.querySelectorAll<HTMLButtonElement>('button.skill-run'),
+  );
+  allButtons.forEach((button) => (button.disabled = true));
+  trigger.textContent = 'Running…';
+  clearSkillResult();
+
+  try {
+    const response = await sendMessage({ kind: 'run_skill', skill });
+    if (response.kind === 'run_result') {
+      const seconds = (response.duration_ms / 1000).toFixed(1);
+      if (response.success) {
+        renderSkillResult(`${skill.name} ran in ${seconds}s`, 'ok');
+      } else {
+        renderSkillResult(
+          `${skill.name} failed after ${seconds}s — ${response.error ?? 'unknown error'}`,
+          'err',
+        );
+      }
+    } else if (response.kind === 'error') {
+      renderSkillResult(`Error: ${response.message}`, 'err');
+    }
+  } catch (err) {
+    renderSkillResult((err as Error).message, 'err');
+  } finally {
+    trigger.textContent = 'Run';
+    allButtons.forEach((button) => (button.disabled = false));
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Handlers
 // -----------------------------------------------------------------------------
 
@@ -134,6 +241,7 @@ async function loadAll(): Promise<void> {
   ]);
   if (configResp.kind === 'config') renderConfig(configResp.config);
   if (statusResp.kind === 'status') renderStatus(statusResp.status);
+  await loadSkills();
 }
 
 saveButton.addEventListener('click', async () => {
@@ -148,6 +256,9 @@ saveButton.addEventListener('click', async () => {
   try {
     const response = await sendMessage({ kind: 'set_config', config });
     saveButton.textContent = response.kind === 'ok' ? 'Saved' : 'Failed';
+    // The skills list is scoped to the saved team_id; reload after a save
+    // so the popup reflects the new tenancy without a manual refresh.
+    if (response.kind === 'ok') await loadSkills();
   } catch {
     saveButton.textContent = 'Failed';
   } finally {
