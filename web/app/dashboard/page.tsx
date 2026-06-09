@@ -11,6 +11,7 @@
 import * as React from 'react';
 
 import { PatternList } from '@/components/PatternList';
+import { SkillList } from '@/components/SkillList';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/EmptyState';
 import { query } from '@/lib/aurora';
@@ -244,6 +245,27 @@ export default async function DashboardPage() {
             />
           ) : (
             <PatternList patterns={data.patterns} />
+          )}
+        </section>
+      )}
+
+      {data.error ? null : (
+        <section>
+          <SectionHeader
+            title="Skill library"
+            subtitle="AI-generated automations. Activate one to let the agent run it."
+            count={data.skills.length}
+          />
+          {data.skills.length === 0 ? (
+            <EmptyState
+              title="No skills yet"
+              description={
+                'Generate a skill from a detected pattern above to populate the ' +
+                'library. Skills can be paused or retired at any time.'
+              }
+            />
+          ) : (
+            <SkillList skills={data.skills} />
           )}
         </section>
       )}
