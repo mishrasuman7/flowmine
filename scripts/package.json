@@ -1,0 +1,22 @@
+{
+  "name": "flowmine-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One-off operational scripts: data seeding, migrations, diagnostics.",
+  "scripts": {
+    "seed:dry": "tsx seed-events.ts --dry-run",
+    "seed:apply": "tsx seed-events.ts --apply",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1063.0",
+    "@aws-sdk/lib-dynamodb": "3.1063.0",
+    "dotenv": "16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.42",
+    "tsx": "4.20.3",
+    "typescript": "5.9.3"
+  }
+}
