@@ -6,6 +6,8 @@
 import Link from 'next/link';
 import * as React from 'react';
 
+import { RealtimeFeed } from '@/components/RealtimeFeed';
+
 export default function DashboardLayout({
   children,
 }: {
@@ -37,6 +39,7 @@ export default function DashboardLayout({
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+      <RealtimeFeed teamId={teamId} />
     </div>
   );
 }
