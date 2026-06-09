@@ -52,7 +52,6 @@ const MAX_TOKENS_SELECTOR = 256;
 // -----------------------------------------------------------------------------
 
 declare global {
-  // eslint-disable-next-line no-var
   var __flowmineAnthropic: Anthropic | undefined;
 }
 

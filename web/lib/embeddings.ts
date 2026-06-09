@@ -30,7 +30,6 @@ export const EMBEDDING_DIMENSIONS = 1536;
 // -----------------------------------------------------------------------------
 
 declare global {
-  // eslint-disable-next-line no-var
   var __flowmineOpenAI: OpenAI | undefined;
 }
 
