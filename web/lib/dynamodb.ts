@@ -66,7 +66,6 @@ function buildClientConfig(): DynamoDBClientConfig {
  * survives that reload cleanly.
  */
 declare global {
-  // eslint-disable-next-line no-var
   var __flowmineDynamoClient: DynamoDBDocumentClient | undefined;
 }
 

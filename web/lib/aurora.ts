@@ -47,7 +47,6 @@ const CONNECTION_TIMEOUT_MS = 5_000;
 // -----------------------------------------------------------------------------
 
 declare global {
-  // eslint-disable-next-line no-var
   var __flowmineAuroraPool: Pool | undefined;
 }
 

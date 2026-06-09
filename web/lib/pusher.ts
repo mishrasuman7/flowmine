@@ -31,7 +31,6 @@ const CLUSTER = process.env.NEXT_PUBLIC_PUSHER_CLUSTER ?? 'eu';
 // -----------------------------------------------------------------------------
 
 declare global {
-  // eslint-disable-next-line no-var
   var __flowminePusher: Pusher | undefined;
 }
 
