@@ -3,12 +3,26 @@
   "name": "FlowMine",
   "version": "0.1.0",
   "description": "An AI workforce that learns by watching how a team works.",
-  "permissions": ["tabs", "storage", "webNavigation", "scripting", "alarms"],
+  "permissions": [
+    "tabs",
+    "storage",
+    "webNavigation",
+    "scripting",
+    "alarms",
+    "clipboardRead"
+  ],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "FlowMine"
