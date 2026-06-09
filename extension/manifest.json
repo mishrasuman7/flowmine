@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "FlowMine",
+  "version": "0.1.0",
+  "description": "An AI workforce that learns by watching how a team works.",
+  "permissions": ["tabs", "storage", "webNavigation", "scripting", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FlowMine"
+  }
+}
