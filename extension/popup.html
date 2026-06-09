@@ -5,21 +5,149 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>FlowMine</title>
     <style>
+      :root {
+        color-scheme: light;
+        --bg: #ffffff;
+        --fg: #0f172a;
+        --muted: #64748b;
+        --border: #e2e8f0;
+        --accent: #0f172a;
+        --accent-fg: #ffffff;
+        --success: #16a34a;
+        --error: #dc2626;
+      }
+      * {
+        box-sizing: border-box;
+      }
       body {
         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        font-size: 14px;
+        font-size: 13px;
         margin: 0;
         padding: 16px;
         width: 320px;
-        color: #0f172a;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+      }
+      h1 {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        margin: 0;
+        color: var(--fg);
+      }
+      .pill {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .field {
+        margin-bottom: 10px;
+      }
+      label {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      input[type='text'],
+      input[type='url'] {
+        width: 100%;
+        padding: 6px 8px;
+        font-size: 13px;
+        font-family: inherit;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        outline: none;
+      }
+      input:focus {
+        border-color: var(--accent);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      button {
+        flex: 1;
+        padding: 7px 10px;
+        font-size: 12px;
+        font-weight: 500;
+        border-radius: 4px;
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: var(--accent-fg);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      button.secondary {
+        background: transparent;
+        color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: progress;
+      }
+      .status {
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .status strong {
+        color: var(--fg);
+        font-weight: 500;
+      }
+      .status .ok {
+        color: var(--success);
+      }
+      .status .err {
+        color: var(--error);
+        word-break: break-word;
       }
     </style>
   </head>
   <body>
-    <h1 style="font-size: 16px; margin: 0 0 12px 0;">FlowMine</h1>
-    <p style="margin: 0; color: #475569;">
-      Popup UI ships in the next commit.
-    </p>
+    <header>
+      <h1>FlowMine</h1>
+      <span class="pill">v0.1.0</span>
+    </header>
+
+    <div class="field">
+      <label for="team-id">Team ID</label>
+      <input id="team-id" type="text" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="field">
+      <label for="user-id">User ID</label>
+      <input id="user-id" type="text" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="field">
+      <label for="api-url">API URL</label>
+      <input id="api-url" type="url" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <div class="row">
+      <button id="save">Save</button>
+      <button id="flush" class="secondary">Flush now</button>
+    </div>
+
+    <div class="status">
+      <div>Buffered: <strong id="buffered">0</strong> events</div>
+      <div>
+        Last flush:
+        <strong id="last-flush">never</strong>
+        <span id="last-count"></span>
+      </div>
+      <div id="last-error"></div>
+    </div>
+
     <script src="popup.js" type="module"></script>
   </body>
 </html>
