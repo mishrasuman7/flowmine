@@ -11,6 +11,7 @@
 import * as React from 'react';
 
 import { PatternList } from '@/components/PatternList';
+import { ROIChart } from '@/components/ROIChart';
 import { SkillList } from '@/components/SkillList';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/EmptyState';
@@ -217,6 +218,10 @@ export default async function DashboardPage() {
           />
         </div>
       </div>
+
+      {data.error || data.patterns.length === 0 ? null : (
+        <ROIChart patterns={data.patterns} />
+      )}
 
       {data.error ? (
         <EmptyState
