@@ -56,6 +56,7 @@ async function run() {
 
   const entryPoints = {
     background: path.join(ROOT, 'background.ts'),
+    content: path.join(ROOT, 'content.ts'),
     popup: path.join(ROOT, 'popup.ts'),
   };
 
