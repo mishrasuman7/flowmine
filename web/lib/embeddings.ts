@@ -1,11 +1,11 @@
 /**
- * FlowMine — OpenAI embeddings.
+ * FlowMine — Gemini embeddings.
  *
- * Thin wrapper around `text-embedding-3-small` (1536 dimensions). The output
- * is fed into the `skills.embedding vector(1536)` column in Aurora so the
- * pattern-detection pipeline can ask pgvector "is there already a skill
- * semantically equivalent to this proposed one?" before spending Sonnet
- * tokens generating a new SkillSpec.
+ * Thin wrapper around `gemini-embedding-001` configured to emit 1536-dim
+ * vectors. The output is fed into the `skills.embedding vector(1536)` column
+ * in Aurora so the pattern-detection pipeline can ask pgvector "is there
+ * already a skill semantically equivalent to this proposed one?" before
+ * spending Flash tokens generating a new SkillSpec.
  *
  * Why this lives in its own module: we want a single place that fixes the
  * model name, the dimension count, and the Postgres-vector literal format —
@@ -13,16 +13,21 @@
  * silently corrupts pgvector queries.
  */
 
-import OpenAI from 'openai';
+import { GoogleGenAI } from '@google/genai';
 
 // -----------------------------------------------------------------------------
 // Configuration
 // -----------------------------------------------------------------------------
 
 /** Locked to the model the Aurora vector column was sized for. */
-export const EMBEDDING_MODEL = 'text-embedding-3-small';
+export const EMBEDDING_MODEL = 'gemini-embedding-001';
 
-/** Must match `vector(1536)` in scripts/schema.sql exactly. */
+/**
+ * Must match `vector(1536)` in scripts/schema.sql exactly. Gemini's
+ * embedding endpoint accepts an outputDimensionality config that downsizes
+ * the default 3072-dim representation into 1536, 768, or 256 dimensions
+ * while preserving the semantic ranking.
+ */
 export const EMBEDDING_DIMENSIONS = 1536;
 
 // -----------------------------------------------------------------------------
@@ -30,21 +35,21 @@ export const EMBEDDING_DIMENSIONS = 1536;
 // -----------------------------------------------------------------------------
 
 declare global {
-  var __flowmineOpenAI: OpenAI | undefined;
+  var __flowmineEmbeddingClient: GoogleGenAI | undefined;
 }
 
-function getClient(): OpenAI {
-  if (!globalThis.__flowmineOpenAI) {
-    const apiKey = process.env.OPENAI_API_KEY;
+function getClient(): GoogleGenAI {
+  if (!globalThis.__flowmineEmbeddingClient) {
+    const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error(
-        'OPENAI_API_KEY missing: set it in web/.env.local before requesting ' +
-          'embeddings.',
+        'GOOGLE_API_KEY missing: set it in web/.env.local before requesting ' +
+          'embeddings. Get a free key at https://aistudio.google.com/app/apikey.',
       );
     }
-    globalThis.__flowmineOpenAI = new OpenAI({ apiKey });
+    globalThis.__flowmineEmbeddingClient = new GoogleGenAI({ apiKey });
   }
-  return globalThis.__flowmineOpenAI;
+  return globalThis.__flowmineEmbeddingClient;
 }
 
 // -----------------------------------------------------------------------------
@@ -63,12 +68,13 @@ export async function embed(text: string): Promise<number[]> {
   }
 
   const client = getClient();
-  const response = await client.embeddings.create({
+  const response = await client.models.embedContent({
     model: EMBEDDING_MODEL,
-    input: cleaned,
+    contents: cleaned,
+    config: { outputDimensionality: EMBEDDING_DIMENSIONS },
   });
 
-  const vector = response.data[0]?.embedding;
+  const vector = response.embeddings?.[0]?.values;
   if (!vector || vector.length !== EMBEDDING_DIMENSIONS) {
     throw new Error(
       `embed: unexpected embedding shape (got ${vector?.length ?? 0}, ` +
@@ -79,7 +85,7 @@ export async function embed(text: string): Promise<number[]> {
 }
 
 /**
- * Compute embeddings for many texts in a single API call. OpenAI bills per
+ * Compute embeddings for many texts in a single API call. Gemini bills per
  * token regardless of batching, but batching cuts wall-clock time and TCP
  * overhead, which matters when the seed script needs to embed hundreds of
  * historical skills in one pass.
@@ -93,22 +99,30 @@ export async function embedMany(texts: string[]): Promise<number[][]> {
   }
 
   const client = getClient();
-  const response = await client.embeddings.create({
+  const response = await client.models.embedContent({
     model: EMBEDDING_MODEL,
-    input: cleaned,
+    contents: cleaned,
+    config: { outputDimensionality: EMBEDDING_DIMENSIONS },
   });
 
-  if (response.data.length !== cleaned.length) {
+  const embeddings = response.embeddings ?? [];
+  if (embeddings.length !== cleaned.length) {
     throw new Error(
-      `embedMany: response count mismatch (got ${response.data.length}, ` +
+      `embedMany: response count mismatch (got ${embeddings.length}, ` +
         `expected ${cleaned.length})`,
     );
   }
 
-  // Sort by index because the OpenAI API does not guarantee response order
-  // when the batch is large enough to be processed across shards.
-  const sorted = [...response.data].sort((a, b) => a.index - b.index);
-  return sorted.map((row) => row.embedding);
+  return embeddings.map((row, idx) => {
+    const values = row.values;
+    if (!values || values.length !== EMBEDDING_DIMENSIONS) {
+      throw new Error(
+        `embedMany: row ${idx} has unexpected dimension ` +
+          `(${values?.length ?? 0}, expected ${EMBEDDING_DIMENSIONS})`,
+      );
+    }
+    return values;
+  });
 }
 
 // -----------------------------------------------------------------------------

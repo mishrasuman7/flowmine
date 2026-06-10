@@ -27,7 +27,7 @@ import { QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { NextResponse } from 'next/server';
 
 import { query, transaction } from '@/lib/aurora';
-import { interpretPattern } from '@/lib/claude';
+import { interpretPattern } from '@/lib/llm';
 import {
   detectPatterns,
   type PatternCandidate,
