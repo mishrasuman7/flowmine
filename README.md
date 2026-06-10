@@ -49,8 +49,8 @@ flowmine/
 | Relational store   | AWS Aurora PostgreSQL 16 + pgvector         |
 | Detection          | Pure algorithm (shared by API route + Lambda) |
 | Realtime           | Pusher Channels                             |
-| AI generation      | Anthropic Claude (Sonnet + Haiku)           |
-| Embeddings         | OpenAI `text-embedding-3-small`             |
+| AI generation      | Google Gemini 2.5 Flash                     |
+| Embeddings         | Google `gemini-embedding-001` (1536-dim)    |
 | Browser client     | Chrome Manifest V3 + TypeScript             |
 
 ## Status

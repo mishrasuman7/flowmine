@@ -201,13 +201,24 @@ then a run of `CREATE EXTENSION`, `CREATE TABLE`, `CREATE INDEX`, and two
 
 ---
 
-## 5. API keys for the AI layer (≈5 min)
+## 5. API key for the AI layer (≈2 min, free)
 
-1. **Anthropic** — https://console.anthropic.com → **API keys** → create one
-   → `ANTHROPIC_API_KEY`. Used for skill generation (Sonnet) and pattern
-   interpretation (Haiku).
-2. **OpenAI** — https://platform.openai.com → **API keys** → create one →
-   `OPENAI_API_KEY`. Used only for `text-embedding-3-small`.
+FlowMine uses **Google Gemini** for both LLM calls (skill generation,
+pattern interpretation, adaptive selector repair) and embeddings
+(semantic skill dedup via pgvector). One key covers everything, and
+Google AI Studio's free tier is generous enough to run the demo without
+attaching a payment method.
+
+1. Open **https://aistudio.google.com/app/apikey**
+2. Sign in with Google
+3. **Create API key** → copy the value (starts with `AIza...`)
+4. Save as `GOOGLE_API_KEY` in `web/.env.local` (the script also accepts
+   `GEMINI_API_KEY` as a fallback name).
+
+Models used:
+- `gemini-2.5-flash` — JSON-structured skill generation, pattern interpretation,
+  selector repair
+- `gemini-embedding-001` — 1536-dim embeddings for pgvector dedup
 
 ---
 
@@ -233,11 +244,8 @@ AURORA_DATABASE=flowmine
 AURORA_USERNAME=flowmine_admin
 AURORA_PASSWORD=...
 
-# Anthropic
-ANTHROPIC_API_KEY=sk-ant-...
-
-# OpenAI (embeddings only)
-OPENAI_API_KEY=sk-...
+# Google Gemini (LLM + embeddings)
+GOOGLE_API_KEY=AIza...
 
 # Pusher
 PUSHER_APP_ID=...
@@ -368,7 +376,7 @@ That's the full loop: observe → detect → generate → execute.
 | Dashboard shows "Aurora is unreachable" | Security group, wrong host, or wrong password | Re-check inbound 5432 rule, `AURORA_HOST` (writer endpoint), `AURORA_PASSWORD` |
 | `seed:apply` hangs or 403s | AWS credentials or region mismatch | Confirm `AWS_REGION=eu-north-1` and the key has DynamoDB access |
 | `/api/detect` returns 404 "no registered users" | `schema.sql` seed block didn't run | Re-run `schema.sql`; confirm the `users` table has the five demo rows |
-| `/api/generate-skill` returns 502 | Anthropic or OpenAI key missing/invalid | Check `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` |
+| `/api/generate-skill` returns 502 | Gemini key missing/invalid | Check `GOOGLE_API_KEY` is set and active |
 | No realtime cards / toasts | Pusher keys missing | Set all four `PUSHER_*` vars; cluster must match (`eu`) |
 | `CREATE EXTENSION vector` fails | Engine isn't Aurora PG 16 | Recreate the cluster on PostgreSQL 16.x |
 | Extension Run does nothing | No active skill, or content script not injected | Activate a skill on the dashboard; reload the target tab so `content.js` is present |

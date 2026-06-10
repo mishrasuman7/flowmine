@@ -1,26 +1,31 @@
 /**
- * FlowMine — Anthropic Claude wrapper.
+ * FlowMine — LLM wrapper (Google Gemini).
  *
  * Three distinct calls live behind this module, one per product use case:
  *
- *   1. generateSkill()    — Claude Sonnet, structured JSON output.
+ *   1. generateSkill()    — Gemini 2.5 Flash, structured JSON output.
  *                           Takes a detected Pattern, returns a SkillSpec the
  *                           Chrome extension can execute step by step.
- *   2. interpretPattern() — Claude Haiku, short JSON output.
+ *   2. interpretPattern() — Gemini 2.5 Flash, short JSON output.
  *                           Takes a Pattern, returns a human-readable
  *                           description plus an ROI estimate the dashboard
  *                           renders on each pattern card.
- *   3. fixSelector()      — Claude Sonnet, free-form text output.
+ *   3. fixSelector()      — Gemini 2.5 Flash, free-form text output.
  *                           Used during skill execution when a CSS selector
  *                           fails: given the broken selector and a DOM
  *                           snapshot, returns a corrected selector targeting
  *                           the semantically equivalent element.
  *
- * Model identifiers are pinned to the canonical aliases listed in the project
- * spec. If Anthropic ships new versions, bump them here and only here.
+ * Why Gemini: Google AI Studio offers a generous free tier (no payment
+ * method required for development quota), which removes the funding
+ * barrier the project's original Anthropic + OpenAI stack imposed on
+ * contributors outside payment-accessible regions.
+ *
+ * Model identifier is pinned in one constant below; bump it there if Google
+ * ships a newer general-purpose Flash version.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI, type GenerateContentResponse } from '@google/genai';
 
 import type {
   Pattern,
@@ -32,16 +37,13 @@ import type {
 // Configuration
 // -----------------------------------------------------------------------------
 
-/** Sonnet handles structured generation and DOM repair (higher quality, slower). */
-const MODEL_SONNET = 'claude-sonnet-4-5';
-
-/** Haiku handles cheap one-shot summarisation (lower cost, faster). */
-const MODEL_HAIKU = 'claude-haiku-4-5';
+/** Gemini 2.5 Flash — fast, JSON-mode capable, generous free tier. */
+const MODEL_FLASH = 'gemini-2.5-flash';
 
 /**
  * Output ceiling per call. SkillSpec JSON is comfortably under 2k tokens; the
- * Haiku interpretation is under 200. The bound exists to prevent runaway
- * billing if a prompt regression makes the model start rambling.
+ * interpretation is under 200. The bound exists to prevent runaway billing if
+ * a prompt regression makes the model start rambling.
  */
 const MAX_TOKENS_SKILL = 2048;
 const MAX_TOKENS_INTERPRETATION = 512;
@@ -52,21 +54,21 @@ const MAX_TOKENS_SELECTOR = 256;
 // -----------------------------------------------------------------------------
 
 declare global {
-  var __flowmineAnthropic: Anthropic | undefined;
+  var __flowmineGemini: GoogleGenAI | undefined;
 }
 
-function getClient(): Anthropic {
-  if (!globalThis.__flowmineAnthropic) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+function getClient(): GoogleGenAI {
+  if (!globalThis.__flowmineGemini) {
+    const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error(
-        'ANTHROPIC_API_KEY missing: set it in web/.env.local before calling ' +
-          'Claude.',
+        'GOOGLE_API_KEY missing: set it in web/.env.local before calling ' +
+          'the LLM. Get a free key at https://aistudio.google.com/app/apikey.',
       );
     }
-    globalThis.__flowmineAnthropic = new Anthropic({ apiKey });
+    globalThis.__flowmineGemini = new GoogleGenAI({ apiKey });
   }
-  return globalThis.__flowmineAnthropic;
+  return globalThis.__flowmineGemini;
 }
 
 // -----------------------------------------------------------------------------
@@ -74,23 +76,22 @@ function getClient(): Anthropic {
 // -----------------------------------------------------------------------------
 
 /**
- * Pull the first text block out of a Messages API response. The SDK returns a
- * union of content blocks (text, tool_use, image, ...); we only ever ask the
- * model for text in this file, so anything else is a bug worth surfacing.
+ * Pull the text content out of a generateContent response. The Gemini SDK
+ * exposes a `text` getter on the response that flattens the first candidate's
+ * concatenated text parts; we surface a clear error if that returns empty so
+ * a silent prompt failure does not propagate undefined downstream.
  */
-function extractText(response: Anthropic.Message): string {
-  const block = response.content[0];
-  if (!block || block.type !== 'text') {
-    throw new Error(
-      `Claude returned unexpected content block: ${block?.type ?? 'none'}`,
-    );
+function extractText(response: GenerateContentResponse): string {
+  const text = response.text;
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    throw new Error('Gemini returned no text content');
   }
-  return block.text.trim();
+  return text.trim();
 }
 
 /**
- * Parse a JSON payload out of Claude's text response, tolerating accidental
- * code fences. The system prompts forbid preambles, but defending against the
+ * Parse a JSON payload out of Gemini's text response, tolerating accidental
+ * code fences. The prompts ask for raw JSON, but defending against the
  * occasional ```json wrapper is cheap insurance against a 100%-reliable model
  * having a 0.1% bad day.
  */
@@ -103,14 +104,14 @@ function parseJson<T>(raw: string, context: string): T {
     return JSON.parse(stripped) as T;
   } catch (err) {
     throw new Error(
-      `Failed to parse JSON from Claude in ${context}: ${(err as Error).message}\n` +
+      `Failed to parse JSON from Gemini in ${context}: ${(err as Error).message}\n` +
         `Raw response: ${raw.slice(0, 400)}`,
     );
   }
 }
 
 // -----------------------------------------------------------------------------
-// 1. Skill generation (Sonnet)
+// 1. Skill generation
 // -----------------------------------------------------------------------------
 
 const SKILL_SYSTEM_PROMPT =
@@ -165,17 +166,21 @@ function buildSkillUserPrompt(pattern: Pattern): string {
  */
 export async function generateSkill(pattern: Pattern): Promise<SkillSpec> {
   const client = getClient();
-  const response = await client.messages.create({
-    model: MODEL_SONNET,
-    max_tokens: MAX_TOKENS_SKILL,
-    system: SKILL_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: buildSkillUserPrompt(pattern) }],
+  const response = await client.models.generateContent({
+    model: MODEL_FLASH,
+    contents: buildSkillUserPrompt(pattern),
+    config: {
+      systemInstruction: SKILL_SYSTEM_PROMPT,
+      maxOutputTokens: MAX_TOKENS_SKILL,
+      responseMimeType: 'application/json',
+      temperature: 0.4,
+    },
   });
   return parseJson<SkillSpec>(extractText(response), 'generateSkill');
 }
 
 // -----------------------------------------------------------------------------
-// 2. Pattern interpretation (Haiku)
+// 2. Pattern interpretation
 // -----------------------------------------------------------------------------
 
 const INTERPRETATION_SYSTEM_PROMPT =
@@ -199,19 +204,21 @@ function buildInterpretationUserPrompt(pattern: Pattern): string {
 /**
  * Cheap, frequent call: runs against every newly detected pattern so the
  * dashboard can render a card with a sentence and a hours-saved number
- * without waiting on the heavier Sonnet skill generation step.
+ * without waiting on the heavier skill generation step.
  */
 export async function interpretPattern(
   pattern: Pattern,
 ): Promise<PatternInterpretation> {
   const client = getClient();
-  const response = await client.messages.create({
-    model: MODEL_HAIKU,
-    max_tokens: MAX_TOKENS_INTERPRETATION,
-    system: INTERPRETATION_SYSTEM_PROMPT,
-    messages: [
-      { role: 'user', content: buildInterpretationUserPrompt(pattern) },
-    ],
+  const response = await client.models.generateContent({
+    model: MODEL_FLASH,
+    contents: buildInterpretationUserPrompt(pattern),
+    config: {
+      systemInstruction: INTERPRETATION_SYSTEM_PROMPT,
+      maxOutputTokens: MAX_TOKENS_INTERPRETATION,
+      responseMimeType: 'application/json',
+      temperature: 0.3,
+    },
   });
   return parseJson<PatternInterpretation>(
     extractText(response),
@@ -220,7 +227,7 @@ export async function interpretPattern(
 }
 
 // -----------------------------------------------------------------------------
-// 3. Adaptive selector repair (Sonnet)
+// 3. Adaptive selector repair
 // -----------------------------------------------------------------------------
 
 const SELECTOR_SYSTEM_PROMPT =
@@ -242,7 +249,7 @@ interface FixSelectorInput {
 }
 
 /**
- * Ask Sonnet for a corrected selector when an executing skill step fails.
+ * Ask Gemini for a corrected selector when an executing skill step fails.
  * Returns null when the model reports no equivalent element exists, so the
  * executor can mark the skill failed and stop instead of looping forever.
  */
@@ -250,21 +257,19 @@ export async function fixSelector(
   input: FixSelectorInput,
 ): Promise<string | null> {
   const client = getClient();
-  const response = await client.messages.create({
-    model: MODEL_SONNET,
-    max_tokens: MAX_TOKENS_SELECTOR,
-    system: SELECTOR_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          `Intent: ${input.intent}`,
-          `Broken selector: ${input.brokenSelector}`,
-          'Current DOM snapshot:',
-          input.domSnapshot,
-        ].join('\n'),
-      },
-    ],
+  const response = await client.models.generateContent({
+    model: MODEL_FLASH,
+    contents: [
+      `Intent: ${input.intent}`,
+      `Broken selector: ${input.brokenSelector}`,
+      'Current DOM snapshot:',
+      input.domSnapshot,
+    ].join('\n'),
+    config: {
+      systemInstruction: SELECTOR_SYSTEM_PROMPT,
+      maxOutputTokens: MAX_TOKENS_SELECTOR,
+      temperature: 0.2,
+    },
   });
 
   const text = extractText(response);
@@ -276,4 +281,4 @@ export async function fixSelector(
 // Exports for diagnostics
 // -----------------------------------------------------------------------------
 
-export { MODEL_SONNET, MODEL_HAIKU };
+export { MODEL_FLASH };

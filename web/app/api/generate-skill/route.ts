@@ -28,7 +28,7 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { query, transaction } from '@/lib/aurora';
-import { generateSkill } from '@/lib/claude';
+import { generateSkill } from '@/lib/llm';
 import { embed, toVectorLiteral } from '@/lib/embeddings';
 import type {
   GenerateSkillRequest,
