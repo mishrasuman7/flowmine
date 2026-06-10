@@ -43,6 +43,16 @@ import type {
 
 export const runtime = 'nodejs';
 
+/**
+ * Bump the function timeout from Vercel's default 10 s to 60 s (the Hobby
+ * plan ceiling). One end-to-end detection run touches DynamoDB (paginated
+ * Query), Aurora (existing-key load), Gemini (per-pattern interpretation),
+ * and Aurora again (transactional INSERT + per-user attribution) — easily
+ * 30 s on a fresh team. The default timeout silently 503s the request
+ * before the persistence step lands.
+ */
+export const maxDuration = 60;
+
 /** Pattern-detection cadence the spec recommends (Section 9 reads a 7-day
  *  window from DynamoDB). The caller can override it per invocation. */
 const DEFAULT_WINDOW_DAYS = 7;
