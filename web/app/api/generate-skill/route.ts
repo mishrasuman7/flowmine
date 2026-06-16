@@ -5,11 +5,11 @@
  * clicks "Generate skill" on a detected pattern card. Pipeline:
  *
  *   1. Validate the inbound pattern payload.
- *   2. Call Claude Sonnet to produce a SkillSpec.
- *   3. Compute an OpenAI embedding from the SkillSpec's name + description.
+ *   2. Call Gemini to produce a SkillSpec.
+ *   3. Compute a Gemini embedding from the SkillSpec's name + description.
  *   4. Run a pgvector nearest-neighbour search on the team's existing skills;
  *      if a skill within cosine distance < 0.15 (similarity > 0.85) exists,
- *      reject as duplicate so we never spend Sonnet tokens twice on the same
+ *      reject as duplicate so we never spend generation tokens twice on the same
  *      workflow.
  *   5. INSERT the new skill row inside a single Aurora transaction.
  *   6. Mark the source pattern as 'reviewed' so the dashboard stops showing
@@ -160,7 +160,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     spec = await generateSkill(pattern);
   } catch (err) {
-    console.error('[/api/generate-skill] Claude generation failed:', err);
+    console.error('[/api/generate-skill] skill generation failed:', err);
     return NextResponse.json(
       { error: 'Skill generation failed.' },
       { status: 502 },

@@ -128,7 +128,7 @@ export type SkillStatus =
   | 'retired';
 
 /**
- * Discriminated union of the action steps Claude is allowed to emit in a
+ * Discriminated union of the action steps the LLM is allowed to emit in a
  * SkillSpec. Each step type names exactly the fields it needs; the executor
  * narrows on `type` before dispatching to the corresponding DOM helper.
  */
@@ -142,7 +142,7 @@ export type SkillAction =
   | { type: 'wait'; ms: number };
 
 /**
- * Structured output of the Claude Sonnet skill-generation prompt. This is what
+ * Structured output of the Gemini skill-generation prompt. This is what
  * the extension executes step by step.
  */
 export interface SkillSpec {
@@ -158,7 +158,7 @@ export interface SkillSpec {
 }
 
 /**
- * Persisted skill row in Aurora. `embedding` is the OpenAI
+ * Persisted skill row in Aurora. `embedding` is the Gemini
  * text-embedding-3-small vector and is omitted from API responses by default
  * so the dashboard payload stays small.
  */
@@ -184,7 +184,7 @@ export interface SkillWithEmbedding extends Skill {
 }
 
 /**
- * Output of the Claude Haiku pattern-interpretation prompt — a short natural
+ * Output of the Gemini pattern-interpretation prompt — a short natural
  * language description plus a quick ROI estimate that the dashboard renders
  * on each pattern card before the user decides to generate a skill.
  */

@@ -4,7 +4,7 @@
  * Drives the full pattern-detection cycle: scan the recent DynamoDB event
  * window for a team, run the pure algorithm in lib/detect, persist newly
  * discovered patterns to Aurora (along with their per-user attribution
- * rows), interpret each one with Claude Haiku for a description + ROI
+ * rows), interpret each one with Gemini for a description + ROI
  * estimate, and push a Pusher new-pattern event so the live dashboard
  * surfaces the card immediately.
  *
@@ -341,7 +341,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       continue;
     }
 
-    // Best-effort Haiku interpretation — failures fall back to a null
+    // Best-effort Gemini interpretation — failures fall back to a null
     // est_hours_monthly so detection still completes when the model is down.
     let estHoursMonthly: number | null = null;
     try {

@@ -10,7 +10,7 @@
  * a fancier S-curve would imply forecast precision we don't have.
  *
  * Behaviour:
- *   - When every pattern's est_hours_monthly is null (Haiku interpretation
+ *   - When every pattern's est_hours_monthly is null (Gemini interpretation
  *     hasn't run yet), we render an explanatory empty card instead of a
  *     misleading zero line.
  *   - The component is client-only because Recharts uses ResponsiveContainer
@@ -122,7 +122,7 @@ export function ROIChart({ patterns }: ROIChartProps) {
         <CardHeader>
           <CardTitle>Hours saved — 12 month projection</CardTitle>
           <CardDescription>
-            Once Claude Haiku interprets the detected patterns, this curve
+            Once Gemini interprets the detected patterns, this curve
             populates automatically.
           </CardDescription>
         </CardHeader>
