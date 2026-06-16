@@ -41,13 +41,24 @@ import type {
 const MODEL_FLASH = 'gemini-2.5-flash';
 
 /**
- * Output ceiling per call. SkillSpec JSON is comfortably under 2k tokens; the
- * interpretation is under 200. The bound exists to prevent runaway billing if
- * a prompt regression makes the model start rambling.
+ * Output ceiling per call. These are intentionally generous because Gemini
+ * 2.5 Flash counts internal "thinking" tokens against maxOutputTokens, and a
+ * tight ceiling causes the model to spend the whole budget thinking and return
+ * a truncated body — which surfaced as "Unexpected end of JSON input" when a
+ * SkillSpec was cut off mid-object. We pair these with thinkingBudget: 0
+ * (see DISABLE_THINKING) so the budget is reserved for the actual answer.
  */
-const MAX_TOKENS_SKILL = 2048;
-const MAX_TOKENS_INTERPRETATION = 512;
+const MAX_TOKENS_SKILL = 8192;
+const MAX_TOKENS_INTERPRETATION = 1024;
 const MAX_TOKENS_SELECTOR = 256;
+
+/**
+ * Turn off Gemini 2.5 Flash's default "thinking" pass. None of our three calls
+ * benefit from chain-of-thought — two demand strict JSON and one a single CSS
+ * selector — and leaving thinking on both wastes the token budget (truncating
+ * output) and adds latency. Spread into each call's config.
+ */
+const DISABLE_THINKING = { thinkingConfig: { thinkingBudget: 0 } } as const;
 
 // -----------------------------------------------------------------------------
 // Singleton
@@ -174,6 +185,7 @@ export async function generateSkill(pattern: Pattern): Promise<SkillSpec> {
       maxOutputTokens: MAX_TOKENS_SKILL,
       responseMimeType: 'application/json',
       temperature: 0.4,
+      ...DISABLE_THINKING,
     },
   });
   return parseJson<SkillSpec>(extractText(response), 'generateSkill');
@@ -218,6 +230,7 @@ export async function interpretPattern(
       maxOutputTokens: MAX_TOKENS_INTERPRETATION,
       responseMimeType: 'application/json',
       temperature: 0.3,
+      ...DISABLE_THINKING,
     },
   });
   return parseJson<PatternInterpretation>(
@@ -269,6 +282,7 @@ export async function fixSelector(
       systemInstruction: SELECTOR_SYSTEM_PROMPT,
       maxOutputTokens: MAX_TOKENS_SELECTOR,
       temperature: 0.2,
+      ...DISABLE_THINKING,
     },
   });
 
