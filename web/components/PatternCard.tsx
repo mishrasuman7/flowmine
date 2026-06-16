@@ -18,6 +18,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   ChevronRight,
@@ -122,6 +123,7 @@ interface GenerateButtonProps {
 }
 
 function GenerateButton({ pattern }: GenerateButtonProps) {
+  const router = useRouter();
   const [state, setState] = React.useState<
     'idle' | 'generating' | 'done' | 'error'
   >('idle');
@@ -151,6 +153,10 @@ function GenerateButton({ pattern }: GenerateButtonProps) {
       });
       if (response.ok) {
         setState('done');
+        // Re-fetch the server component data so the newly generated skill
+        // appears in the Skill library section immediately, without the
+        // operator having to manually reload the page.
+        router.refresh();
         return;
       }
       const body = (await response.json().catch(() => null)) as
