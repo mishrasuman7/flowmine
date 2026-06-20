@@ -8,8 +8,17 @@ FlowMine is a B2B SaaS platform that observes browser activity across a team, de
 
 1. **Observe** — A Chrome extension captures lightweight browser metadata (domain, navigation, tab activity). No keystrokes. No page content. No passwords.
 2. **Detect** — A streaming pattern-detection pipeline identifies multi-step sequences that recur across multiple employees.
-3. **Generate** — Claude turns each pattern into a structured, executable skill specification.
+3. **Generate** — Google Gemini turns each pattern into a structured, executable skill specification.
 4. **Execute** — The extension runs the skill in the user's browser, with adaptive selector recovery when the DOM shifts.
+
+## Architecture
+
+![FlowMine architecture and data flow](./docs/architecture.svg)
+
+The capture → detect → generate → execute loop spans four providers. Two AWS
+databases do distinct jobs: **DynamoDB** absorbs the high-write event stream,
+while **Aurora PostgreSQL + pgvector** stores patterns and skills and powers
+semantic dedup of generated skills.
 
 ## Quickstart
 
